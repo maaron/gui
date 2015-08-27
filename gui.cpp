@@ -10,6 +10,7 @@
 
 #include <vector>
 #include <string>
+#include <boost/optional.hpp>
 
 using namespace drawing;
 
@@ -18,9 +19,12 @@ text::factory tf;
 
 text::format text_format(tf, L"Arial", NULL,
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_STRETCH_NORMAL, 10.0f, L"en-us");
+    DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"en-us");
 
 text::ellipses dots(tf, text_format);
+
+point mouse;
+boost::optional<point> click;
 
 auto write_label = [&](target& t, std::wstring const& s, drawing::rectangle const& r)
 {
@@ -41,43 +45,98 @@ struct node
     std::wstring name;
     std::vector<node> children;
 
-    node(std::wstring const& n) : name(n) {}
+    bool expanded;
+
+    node(std::wstring const& n) 
+        : name(n), expanded(false) {}
 };
 
-target draw_tree(target& t, const node& tree);
-target draw_header(target& t, const node& tree);
-target draw_node(target& t, const node& tree);
+target draw_tree(target& t, node& tree);
+target draw_header(target& t, node& tree);
+target draw_node(target& t, node& tree);
 
-target draw_tree(target& t, const node& tree)
+target draw_tree(target& t, node& tree)
 {
     auto header = draw_header(t, tree);
 
-    auto children = right_of(below(t, header.bounds), 5);
+    auto children = to_right(below(t, header), 10);
     auto remaining = children;
-    for (auto it = tree.children.begin(); it != tree.children.end(); it++)
+
+    if (tree.expanded)
     {
-        auto child = draw_tree(remaining, *it);
-        remaining = below(remaining, child.bounds);
-        if (empty(remaining)) break;
+        for (auto it = tree.children.begin(); it != tree.children.end(); it++)
+        {
+            auto child = draw_tree(remaining, *it);
+            remaining = below(remaining, child);
+            if (empty(remaining)) break;
+        }
+
+        draw(t, above(children, remaining), { 0.8, 0.8, 1, 1 });
     }
 
-    return above(t, remaining.bounds.top);
+    return above(t, remaining.top);
 }
 
-target draw_header(target& t, const node& node)
+target draw_expander(target& t, bool expanded)
 {
-    auto label = draw_node(right_of(t, 10), node);
-    auto header = from_top(t, label.bounds.height());
+    point p1, p2, p3;
+    auto bounds = centered(t, point(8, 8));
+
+    if (!expanded)
+    {
+        p1 = bounds.top_left();
+        p2 = bounds.center();
+        p3 = bounds.bottom_left();
+    }
+    else
+    {
+        p1 = bounds.top_left();
+        p2 = bounds.top_right();
+        p3 = bounds.center();
+    }
+
+    draw(t, line(p1, p2), { 0, 0, 0, 1 });
+    draw(t, line(p2, p3), { 0, 0, 0, 1 });
+    draw(t, line(p3, p1), { 0, 0, 0, 1 });
+
+    return t;
+}
+
+target draw_header(target& t, node& node)
+{
+    auto label = draw_node(to_right(t, 15), node);
+    auto header = from_left(t, 15);
+    header.bottom = label.bottom;
     auto expander = from_left(header, 10);
-    draw(t, centered(expander, point(3, 3)).bounds, { 0, 0, 0, 1 });
+
+    if (click && contains(expander, click.get()))
+    {
+        node.expanded = !node.expanded;
+        click = boost::none;
+    }
+
+    draw_expander(expander, node.expanded);
     return header;
 }
 
-target draw_node(target& t, const node& node)
+target draw_node(target& t, node& node)
 {
-    auto used = from_top(t, 14);
-    write_label(t, node.name, used.bounds);
+    auto used = from_top(t, 20);
+    if (contains(used, mouse)) fill(used, { 0.8, 1, 0.8, 1 });
+    write_label(t, node.name, centered(used, point(used.width(), 15)));
     return used;
+}
+
+target draw_status(target& t)
+{
+    std::wstring status_text =
+        L"Pointer: " +
+        std::to_wstring((int)mouse.x) + L", " +
+        std::to_wstring((int)mouse.y);
+
+    draw(t, t.top_edge(), { 0, 0, 0, 1 });
+    write_label(t, status_text, centered(t, point(t.width(), 12)));
+    return t;
 }
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
@@ -103,9 +162,22 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
     ui::window w(f);
     w.on_render([&](target& t)
     {
-        fill(t, t.bounds, { 1.0, 1.0, 1.0, 1.0 });
+        fill(t, { 1.0, 1.0, 1.0, 1.0 });
 
-        draw_tree(t, root);
+        auto status = to_top(t, 20);
+        draw_status(status);
+
+        draw_tree(clip(inside(above(t, status), 5)), root);
+    });
+    w.on_pointer([&](drawing::point& p)
+    {
+        mouse = p;
+        w.redraw();
+    });
+    w.on_mousedown([&](drawing::point& p)
+    {
+        click = p;
+        w.redraw();
     });
     w.show();
 

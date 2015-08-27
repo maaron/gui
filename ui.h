@@ -3,6 +3,7 @@
 #include <boost/thread/once.hpp>
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#include <windowsx.h>
 #include <functional>
 #include "drawing.h"
 #include "target.h"
@@ -30,8 +31,11 @@ namespace ui
     class window
     {
         HWND _hWnd;
-        std::function<void(drawing::target&)> _onrender;
         drawing::d2d::hwnd_render_target _hwnd_render_target;
+
+        std::function<void(drawing::target&)> _onrender;
+        std::function<void(drawing::point&)> _onpointer;
+        std::function<void(drawing::point&)> _onmousedown;
 
     public:
         window(drawing::factory& f)
@@ -57,10 +61,25 @@ namespace ui
             _onrender = f;
         }
 
+        void on_pointer(std::function<void(drawing::point&)> f)
+        {
+            _onpointer = f;
+        }
+
+        void on_mousedown(std::function<void(drawing::point&)> f)
+        {
+            _onmousedown = f;
+        }
+
         void show()
         {
             ShowWindow(_hWnd, SW_SHOWNORMAL);
             UpdateWindow(_hWnd);
+        }
+
+        void redraw()
+        {
+            ::InvalidateRect(_hWnd, NULL, false);
         }
 
     private:
@@ -75,7 +94,7 @@ namespace ui
             wcex.cbWndExtra = 0;
             wcex.hInstance = ::GetModuleHandle(NULL);
             wcex.hIcon = NULL;
-            wcex.hCursor = NULL;
+            wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
             wcex.hbrBackground = NULL;
             wcex.lpszMenuName = NULL;
             wcex.lpszClassName = L"ui::window";
@@ -107,7 +126,34 @@ namespace ui
             UINT width = LOWORD(lParam);
             UINT height = HIWORD(lParam);
             _hwnd_render_target.resize(width, height);
+            ::InvalidateRect(_hWnd, NULL, false);
             return 1;
+        }
+
+        LRESULT wm_mousemove(WPARAM wParam, LPARAM lParam)
+        {
+            if (_onpointer)
+            {
+                _onpointer(drawing::point(
+                    (drawing::distance)GET_X_LPARAM(lParam),
+                    (drawing::distance)GET_Y_LPARAM(lParam)));
+
+                return 0;
+            }
+            return 0;
+        }
+
+        LRESULT wm_lbuttondown(WPARAM wParam, LPARAM lParam)
+        {
+            if (_onmousedown)
+            {
+                _onmousedown(drawing::point(
+                    (drawing::distance)GET_X_LPARAM(lParam),
+                    (drawing::distance)GET_Y_LPARAM(lParam)));
+
+                return 1;
+            }
+            return 0;
         }
 
         static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -135,6 +181,14 @@ namespace ui
             else if (message == WM_SIZE)
             {
                 return instance(hWnd)->wm_size(wParam, lParam);
+            }
+            else if (message == WM_MOUSEMOVE)
+            {
+                return instance(hWnd)->wm_mousemove(wParam, lParam);
+            }
+            else if (message == WM_LBUTTONDOWN)
+            {
+                return instance(hWnd)->wm_lbuttondown(wParam, lParam);
             }
             else
             {
