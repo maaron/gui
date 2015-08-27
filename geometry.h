@@ -8,6 +8,14 @@ namespace drawing
 {
     typedef FLOAT distance;
     
+    struct point : D2D_POINT_2F
+    {
+        point(distance x, distance y)
+        : D2D_POINT_2F({ x, y }) {}
+
+        point() : D2D_POINT_2F({ 0, 0 }) {}
+    };
+
     struct rectangle : D2D_RECT_F
     {
         rectangle(distance left, distance top, distance right, distance bottom)
@@ -17,14 +25,7 @@ namespace drawing
 
         distance height() const { return bottom - top; }
         distance width() const { return right - left; }
-    };
-
-    struct point : D2D_POINT_2F
-    {
-        point(distance x, distance y)
-            : D2D_POINT_2F({ x, y }) {}
-
-        point() : D2D_POINT_2F({ 0, 0 }) {}
+        point top_left() const { return point(left, top); }
     };
 
     typedef D2D1_COLOR_F color;
@@ -43,7 +44,7 @@ namespace drawing
             r.right,
             std::min(r.top + d, r.bottom));
     }
-
+    
     rectangle below(rectangle const& r, distance d)
     {
         return rectangle(
@@ -60,6 +61,24 @@ namespace drawing
             std::min(d.bottom, r.bottom),
             r.right,
             r.bottom);
+    }
+
+    rectangle above(rectangle const& r, distance d)
+    {
+        return rectangle(
+            r.left,
+            r.top,
+            r.right,
+            std::min(r.bottom, d));
+    }
+
+    rectangle above(rectangle const& r, rectangle const& d)
+    {
+        return rectangle(
+            r.left,
+            r.top,
+            r.right,
+            std::min(r.bottom, d.top));
     }
 
     rectangle from_left(rectangle const& r, distance d)
@@ -94,5 +113,22 @@ namespace drawing
         return rectangle(
             r.left + d, r.top + d,
             r.right - d, r.bottom - d);
+    }
+
+    point center(rectangle const& r)
+    {
+        return point(
+            r.left + (r.right - r.left) / 2, 
+            r.top + (r.bottom - r.top) / 2);
+    }
+
+    rectangle centered(rectangle const& r, point const& size)
+    {
+        point c = center(r);
+        return rectangle(
+            c.x - size.x / 2,
+            c.y - size.y / 2,
+            c.x + size.x / 2,
+            c.y + size.y / 2);
     }
 }

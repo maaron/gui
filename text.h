@@ -53,4 +53,15 @@ namespace text
                 string.c_str(), string.length(), textFormat.ptr, maxWidth, maxHeight, &ptr));
         }
     };
+
+    struct ellipses
+    {
+        com::com_ptr<IDWriteInlineObject> ptr;
+
+        ellipses(factory& f, format& textFormat)
+        {
+            com::throw_call(f.ptr->CreateEllipsisTrimmingSign(
+                textFormat.ptr, &ptr));
+        }
+    };
 }
