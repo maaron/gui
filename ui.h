@@ -36,6 +36,7 @@ namespace ui
         std::function<void(drawing::target&)> _onrender;
         std::function<void(drawing::point&)> _onpointer;
         std::function<void(drawing::point&)> _onmousedown;
+        std::function<void(UINT_PTR)> _ontimer;
 
     public:
         window(drawing::factory& f)
@@ -71,6 +72,11 @@ namespace ui
             _onmousedown = f;
         }
 
+        void on_timer(std::function<void(UINT_PTR)> f)
+        {
+            _ontimer = f;
+        }
+
         void show()
         {
             ShowWindow(_hWnd, SW_SHOWNORMAL);
@@ -80,6 +86,18 @@ namespace ui
         void redraw()
         {
             ::InvalidateRect(_hWnd, NULL, false);
+        }
+
+        void set_timer(UINT timeout)
+        {
+            ::SetTimer(_hWnd, 0, timeout, NULL);
+        }
+
+        void invoke_async(std::function<void()> f)
+        {
+            auto fp = new std::function<void()>();
+            *fp = f;
+            ::PostMessage(_hWnd, WM_APP, (UINT_PTR)fp, 0);
         }
 
     private:
@@ -156,6 +174,25 @@ namespace ui
             return 0;
         }
 
+        LRESULT wm_timer(WPARAM wParam, LPARAM lParam)
+        {
+            if (_ontimer)
+            {
+                _ontimer(wParam);
+
+                return 1;
+            }
+            return 0;
+        }
+
+        LRESULT wm_app(WPARAM wParam, LPARAM lParam)
+        {
+            auto fp = reinterpret_cast<std::function<void()>*>(wParam);
+            (*fp)();
+            delete fp;
+            return 1;
+        }
+
         static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             if (message == WM_CREATE)
@@ -189,6 +226,14 @@ namespace ui
             else if (message == WM_LBUTTONDOWN)
             {
                 return instance(hWnd)->wm_lbuttondown(wParam, lParam);
+            }
+            else if (message == WM_TIMER)
+            {
+                return instance(hWnd)->wm_timer(wParam, lParam);
+            }
+            else if (message == WM_APP)
+            {
+                return instance(hWnd)->wm_app(wParam, lParam);
             }
             else
             {

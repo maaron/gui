@@ -53,4 +53,22 @@ namespace drawing
             rtarget->get_target()->PopAxisAlignedClip();
         }
     };
+
+    struct transform
+    {
+        matrix3x2 old;
+        target& tgt;
+
+        transform(target& t, matrix3x2 const& m) : tgt(t)
+        {
+            auto native = t.rtarget->get_target();
+            native->GetTransform(&old);
+            native->SetTransform(m);
+        }
+
+        ~transform()
+        {
+            tgt.rtarget->get_target()->SetTransform(old);
+        }
+    };
 }

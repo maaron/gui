@@ -9,13 +9,20 @@
 #pragma comment(lib, "dwrite")
 
 #include <vector>
+#include <list>
 #include <string>
+#include <thread>
 #include <boost/optional.hpp>
+#include <boost/asio/deadline_timer.hpp>
+#include <boost/date_time/posix_time/posix_time_duration.hpp>
 
 using namespace drawing;
 
+boost::asio::io_service io;
+boost::asio::deadline_timer timer(io);
 drawing::factory f;
 text::factory tf;
+ui::window w(f);
 
 text::format text_format(tf, L"Arial", NULL,
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
@@ -25,6 +32,27 @@ text::ellipses dots(tf, text_format);
 
 point mouse;
 boost::optional<point> click;
+std::list<std::function<void()> > timers;
+
+void animate(boost::asio::deadline_timer& timer, std::function<bool()> f)
+{
+    std::function<void(const boost::system::error_code&)> timer_func;
+    
+    auto ui_func = [f, &timer]()
+    {
+        if (f())
+        {
+            animate(timer, f);
+        }
+    };
+    timer_func = [f, ui_func](const boost::system::error_code& error)
+    {
+        if (error) return;
+        w.invoke_async(ui_func);
+    };
+    timer.expires_from_now(boost::posix_time::milliseconds(50));
+    timer.async_wait(timer_func);
+}
 
 auto write_label = [&](target& t, std::wstring const& s, drawing::rectangle const& r)
 {
@@ -46,9 +74,10 @@ struct node
     std::vector<node> children;
 
     bool expanded;
+    degrees expander_angle;
 
     node(std::wstring const& n) 
-        : name(n), expanded(false) {}
+        : name(n), expanded(false), expander_angle(0) {}
 };
 
 target draw_tree(target& t, node& tree);
@@ -77,24 +106,16 @@ target draw_tree(target& t, node& tree)
     return above(t, remaining.top);
 }
 
-target draw_expander(target& t, bool expanded)
+target draw_expander(target& t, node& node)
 {
     point p1, p2, p3;
     auto bounds = centered(t, point(8, 8));
 
-    if (!expanded)
-    {
-        p1 = bounds.top_left();
-        p2 = bounds.center();
-        p3 = bounds.bottom_left();
-    }
-    else
-    {
-        p1 = bounds.top_left();
-        p2 = bounds.top_right();
-        p3 = bounds.center();
-    }
+    p1 = bounds.top_left();
+    p2 = bounds.center();
+    p3 = bounds.bottom_left();
 
+    transform rot(t, D2D1::Matrix3x2F::Rotation(node.expander_angle, center(bounds)));
     draw(t, line(p1, p2), { 0, 0, 0, 1 });
     draw(t, line(p2, p3), { 0, 0, 0, 1 });
     draw(t, line(p3, p1), { 0, 0, 0, 1 });
@@ -111,11 +132,30 @@ target draw_header(target& t, node& node)
 
     if (click && contains(expander, click.get()))
     {
-        node.expanded = !node.expanded;
+        if (!node.expanded)
+        {
+            node.expanded = true;
+            animate(timer, [&]() -> bool
+            {
+                node.expander_angle += (90 / 5);
+                w.redraw();
+                return (node.expander_angle < 90);
+            });
+        }
+        else
+        {
+            node.expanded = false;
+            animate(timer, [&]() -> bool
+            {
+                node.expander_angle -= (90 / 5);
+                w.redraw();
+                return (node.expander_angle > 0);
+            });
+        }
         click = boost::none;
     }
 
-    draw_expander(expander, node.expanded);
+    draw_expander(expander, node);
     return header;
 }
 
@@ -147,6 +187,9 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 
+    boost::asio::io_service::work work(io);
+    std::thread io_thread([&](){ io.run(); });
+
     node root(L"root");
 
     root.children.push_back(node(L"child1"));
@@ -159,7 +202,6 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
     root.children.push_back(node(L"child3"));
     root.children[2].children.push_back(node(L"granchild1 of 3"));
 
-    ui::window w(f);
     w.on_render([&](target& t)
     {
         fill(t, { 1.0, 1.0, 1.0, 1.0 });
@@ -179,6 +221,10 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
         click = p;
         w.redraw();
     });
+    w.on_timer([&](UINT_PTR id)
+    {
+        for (auto f : timers) f();
+    });
     w.show();
 
  	// TODO: Place code here.
@@ -196,6 +242,9 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 			DispatchMessage(&msg);
 		}
 	}
+
+    io.stop();
+    io_thread.join();
 
 	return (int) msg.wParam;
 }

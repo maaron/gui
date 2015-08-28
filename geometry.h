@@ -7,6 +7,7 @@
 namespace drawing
 {
     typedef FLOAT distance;
+    typedef FLOAT degrees;
 
     struct point;
     struct line;
@@ -62,6 +63,8 @@ namespace drawing
                 top + (bottom - top) / 2);
         }
     };
+
+    typedef D2D1_MATRIX_3X2_F matrix3x2;
 
     typedef D2D1_COLOR_F color;
 
