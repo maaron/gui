@@ -73,11 +73,64 @@ struct node
     std::wstring name;
     std::vector<node> children;
 
-    bool expanded;
+    enum { collapsed, expanding, expanded, collapsing } state;
+    std::chrono::monotonic_clock::time_point start;
     degrees expander_angle;
 
+    bool is_expanded()
+    {
+        return state == expanded ||
+            state == collapsing;
+    }
+
+    void click()
+    {
+        switch (state)
+        {
+        case collapsed: 
+            state = expanding;
+            start = std::chrono::monotonic_clock::now();
+            w.on_timer([this](){ w.redraw(); return state == expanding; });
+            break;
+
+        case expanded: 
+            state = collapsing;
+            start = std::chrono::monotonic_clock::now();
+            w.on_timer([this](){ w.redraw(); return state == collapsing; });
+            break;
+        }
+    }
+
+    void update()
+    {
+        const std::chrono::duration<float> d(0.1);
+        auto now = std::chrono::monotonic_clock::now();
+        std::chrono::duration<float> elapsed = now - start;
+        auto ratio = elapsed.count() / d.count();
+
+        switch (state)
+        {
+        case expanding:
+            if (elapsed > d)
+            {
+                state = expanded;
+                expander_angle = 90;
+            }
+            else expander_angle = 90 * ratio;
+            break;
+
+        case collapsing:
+            if (elapsed > d)
+            {
+                state = collapsed;
+                expander_angle = 0;
+            }
+            else expander_angle = 90 - 90 * ratio;
+        }
+    }
+
     node(std::wstring const& n) 
-        : name(n), expanded(false), expander_angle(0) {}
+        : name(n), state(collapsed), expander_angle(0) {}
 };
 
 target draw_tree(target& t, node& tree);
@@ -91,7 +144,7 @@ target draw_tree(target& t, node& tree)
     auto children = to_right(below(t, header), 10);
     auto remaining = children;
 
-    if (tree.expanded)
+    if (tree.is_expanded())
     {
         for (auto it = tree.children.begin(); it != tree.children.end(); it++)
         {
@@ -132,28 +185,10 @@ target draw_header(target& t, node& node)
 
     if (click && contains(expander, click.get()))
     {
-        if (!node.expanded)
-        {
-            node.expanded = true;
-            animate(timer, [&]() -> bool
-            {
-                node.expander_angle += (90 / 5);
-                w.redraw();
-                return (node.expander_angle < 90);
-            });
-        }
-        else
-        {
-            node.expanded = false;
-            animate(timer, [&]() -> bool
-            {
-                node.expander_angle -= (90 / 5);
-                w.redraw();
-                return (node.expander_angle > 0);
-            });
-        }
+        node.click();
         click = boost::none;
     }
+    node.update();
 
     draw_expander(expander, node);
     return header;
@@ -220,10 +255,6 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
     {
         click = p;
         w.redraw();
-    });
-    w.on_timer([&](UINT_PTR id)
-    {
-        for (auto f : timers) f();
     });
     w.show();
 

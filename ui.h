@@ -7,6 +7,7 @@
 #include <functional>
 #include "drawing.h"
 #include "target.h"
+#include <list>
 
 namespace ui
 {
@@ -33,10 +34,13 @@ namespace ui
         HWND _hWnd;
         drawing::d2d::hwnd_render_target _hwnd_render_target;
 
+        typedef std::list<std::function<bool()> > timer_list;
+        typedef timer_list::iterator timer_id;
+
         std::function<void(drawing::target&)> _onrender;
         std::function<void(drawing::point&)> _onpointer;
         std::function<void(drawing::point&)> _onmousedown;
-        std::function<void(UINT_PTR)> _ontimer;
+        timer_list _ontimer;
 
     public:
         window(drawing::factory& f)
@@ -72,9 +76,21 @@ namespace ui
             _onmousedown = f;
         }
 
-        void on_timer(std::function<void(UINT_PTR)> f)
+        timer_id on_timer(std::function<bool()> f)
         {
-            _ontimer = f;
+            if (_ontimer.empty())
+                ::SetTimer(_hWnd, 0, 30, NULL);
+
+            _ontimer.push_front(f);
+            return _ontimer.begin();
+        }
+
+        void off_timer(timer_id id)
+        {
+            _ontimer.erase(id);
+
+            if (_ontimer.empty())
+                ::KillTimer(_hWnd, 0);
         }
 
         void show()
@@ -174,15 +190,19 @@ namespace ui
             return 0;
         }
 
+        struct timer_helper
+        {
+            typedef bool result_type;
+
+            template <typename F>
+            bool operator()(F f) const { return !f(); }
+        };
         LRESULT wm_timer(WPARAM wParam, LPARAM lParam)
         {
-            if (_ontimer)
-            {
-                _ontimer(wParam);
+            _ontimer.erase(std::remove_if(_ontimer.begin(), _ontimer.end(), 
+                timer_helper()), _ontimer.end());
 
-                return 1;
-            }
-            return 0;
+            return 1;
         }
 
         LRESULT wm_app(WPARAM wParam, LPARAM lParam)
