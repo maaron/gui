@@ -4,12 +4,15 @@
 #include "stdafx.h"
 #include "gui.h"
 #include "ui.h"
+#include "tree.h"
 
 #include <dwrite.h>
 #pragma comment(lib, "dwrite")
 
+#include <iostream>
 #include <vector>
 #include <list>
+#include <deque>
 #include <string>
 #include <thread>
 #include <boost/optional.hpp>
@@ -70,8 +73,10 @@ auto write_label = [&](target& t, std::wstring const& s, drawing::rectangle cons
 
 struct node
 {
+    typedef std::list<node>::iterator iterator;
+
     std::wstring name;
-    std::vector<node> children;
+    std::list<node> children;
 
     enum { collapsed, expanding, expanded, collapsing } state;
     std::chrono::monotonic_clock::time_point start;
@@ -133,30 +138,48 @@ struct node
         : name(n), state(collapsed), expander_angle(0) {}
 };
 
+// Placeholding class for tree structures that have persistent iterators.
+struct tree_view
+{
+    typedef std::deque<node::iterator>::iterator path_iterator;
+    std::deque<node::iterator> path;
+    node root;
+
+    tree_view() : root(L"") {}
+};
+
 target draw_tree(target& t, node& tree);
 target draw_header(target& t, node& tree);
 target draw_node(target& t, node& tree);
+
+target draw_children(target& t, node::iterator it, node::iterator end)
+{
+    auto remaining = t;
+    for (; it != end; it++)
+    {
+        auto child = draw_tree(remaining, *it);
+        remaining = below(remaining, child);
+        if (empty(remaining)) break;
+    }
+    return above(t, remaining);
+}
 
 target draw_tree(target& t, node& tree)
 {
     auto header = draw_header(t, tree);
 
     auto children = to_right(below(t, header), 10);
-    auto remaining = children;
 
     if (tree.is_expanded())
     {
-        for (auto it = tree.children.begin(); it != tree.children.end(); it++)
-        {
-            auto child = draw_tree(remaining, *it);
-            remaining = below(remaining, child);
-            if (empty(remaining)) break;
-        }
+        children = draw_children(children, 
+            tree.children.begin(), tree.children.end());
 
-        draw(t, above(children, remaining), { 0.8, 0.8, 1, 1 });
+        draw(t, children, { 0.8, 0.8, 1, 1 });
+
+        return children;
     }
-
-    return above(t, remaining.top);
+    else return header;
 }
 
 target draw_expander(target& t, node& node)
@@ -214,6 +237,45 @@ target draw_status(target& t)
     return t;
 }
 
+target draw_tree_view_depth(target& t, tree_view& view, tree_view::path_iterator path)
+{
+    auto remaining = t;
+    if (path != view.path.end())
+    {
+        auto used = draw_tree_view_depth(to_right(t, 10), view, path + 1);
+        remaining = below(remaining, used);
+    }
+
+    draw_children(below(t, remaining), *path, (*(path - 1))->children.end());
+
+    return t;
+}
+
+target draw_tree_view(target& t, tree_view& view)
+{
+    return draw_tree_view_depth(t, view, view.path.begin() + 1);
+}
+
+struct mynode
+{
+    std::wstring name;
+};
+
+template <typename Container>
+struct tree
+{
+    typedef Container container;
+    typedef typename Container::value_type value_type;
+
+    value_type value;
+    container children;
+};
+
+template <typename T>
+struct vector_tree : public tree<std::vector<T> > {};
+
+typedef vector_tree<mynode> node_tree;
+
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPTSTR    lpCmdLine,
@@ -222,20 +284,38 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 
+    node_tree nt;
+    nt.value.name = L"root";
+
+    ui::depth_first_tree_view<node_tree> tview(nt);
+    for (auto& n : tview)
+    {
+        std::wcout << n.name << std::endl;
+    }
+
     boost::asio::io_service::work work(io);
     std::thread io_thread([&](){ io.run(); });
 
     node root(L"root");
 
     root.children.push_back(node(L"child1"));
-    root.children[0].children.push_back(node(L"granchild1 of 1"));
-    root.children[0].children.push_back(node(L"granchild2 of 1"));
+    auto child = root.children.rbegin();
+    child->children.push_back(node(L"granchild1 of 1"));
+    child->children.push_back(node(L"granchild2 of 1"));
+    
     root.children.push_back(node(L"child2"));
-    root.children[1].children.push_back(node(L"granchild1 of 2"));
-    root.children[1].children.push_back(node(L"granchild2 of 2"));
-    root.children[1].children.push_back(node(L"granchild3 of 2"));
+    child = root.children.rbegin();
+    child->children.push_back(node(L"granchild1 of 2"));
+    child->children.push_back(node(L"granchild2 of 2"));
+    child->children.push_back(node(L"granchild3 of 2"));
+
     root.children.push_back(node(L"child3"));
-    root.children[2].children.push_back(node(L"granchild1 of 3"));
+    child = root.children.rbegin();
+    child->children.push_back(node(L"granchild1 of 3"));
+
+    tree_view tv;
+    tv.root.children.push_back(root);
+    tv.path.push_back(tv.root.children.begin());
 
     w.on_render([&](target& t)
     {
@@ -244,7 +324,8 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
         auto status = to_top(t, 20);
         draw_status(status);
 
-        draw_tree(clip(inside(above(t, status), 5)), root);
+        //draw_tree(clip(inside(above(t, status), 5)), root);
+        draw_tree_view(clip(inside(above(t, status), 5)), tv);
     });
     w.on_pointer([&](drawing::point& p)
     {
